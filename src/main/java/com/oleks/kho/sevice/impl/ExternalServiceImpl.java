@@ -1,22 +1,38 @@
 package com.oleks.kho.sevice.impl;
 
+import com.oleks.kho.RateAdapter;
 import com.oleks.kho.model.ExchangeRatesResponse;
+import io.reactivex.Single;
+import io.reactivex.functions.BiFunction;
+import org.springframework.stereotype.Service;
 
-import javax.ws.rs.client.ClientBuilder;
-import javax.ws.rs.client.Invocation;
-import javax.ws.rs.core.MediaType;
-import javax.ws.rs.core.Response;
+import javax.inject.Inject;
+import java.math.BigDecimal;
 
+@Service
 public class ExternalServiceImpl {
+    @Inject
+    private RateAdapter rateAdapter;
 
-    private static final String LATEST_BASE = "http://data.fixer.io/api/latest?base=%s&access_key=0f9147d15c77799c89810ea048612bd5";
+    public Single<Boolean> isStronger(String pastDate, String baseCurrency, String counterCurrency) {
+        Single<ExchangeRatesResponse> todaysRates = getRates(baseCurrency);
+        Single<ExchangeRatesResponse> historicalRates = rateAdapter.getHistoricalRates(pastDate, baseCurrency);
 
-    public void makeRequest(String baseCurrency) {
-        ClientBuilder clientBuilder = ClientBuilder.newBuilder();
+        return Single.zip(todaysRates, historicalRates, buildBiFunction(counterCurrency, pastDate));
+    }
 
-        ExchangeRatesResponse rate = clientBuilder.build()
-                .target(String.format(LATEST_BASE, baseCurrency))
-                .request(MediaType.APPLICATION_JSON)
-                .get(ExchangeRatesResponse.class);
+    private BiFunction<ExchangeRatesResponse, ExchangeRatesResponse, Boolean> buildBiFunction(String counterCurrency, String pastDate) {
+        return (todaysRatesResponse, historicalRatesResponse) -> {
+            BigDecimal todaysNum = todaysRatesResponse.getRates().get(counterCurrency);
+            BigDecimal historicalNum = historicalRatesResponse.getRates().get(counterCurrency);
+
+            System.out.println(String.format("today: %s, at %s: %s", todaysNum, pastDate, historicalNum));
+
+            return todaysNum.compareTo(historicalNum) < 0;
+        };
+    }
+
+    public Single<ExchangeRatesResponse> getRates(String baseCurrency) {
+        return rateAdapter.getRateSingle(baseCurrency);
     }
 }
